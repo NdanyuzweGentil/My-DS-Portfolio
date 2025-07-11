@@ -1,458 +1,126 @@
-// server.js - Node.js Express Server with SQLite Database
+// server.js (Updated for conditional SSL)
+
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
-const path = require("path");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
-const validator = require("validator");
-
-// --- Swagger Imports ---
+const { body, validationResult } = require("express-validator");
 const swaggerUi = require("swagger-ui-express");
 const swaggerJsdoc = require("swagger-jsdoc");
-// -----------------------
+const { Pool } = require("pg");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Security middleware
-app.use(helmet());
-app.use(
-  cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? "https://yourdomain.com"
-        : "http://localhost:3000", // Ensure this matches your frontend's origin
-    credentials: true,
-  })
-);
-
-// Rate limiting
-const contactLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
-  message: {
-    error: "Too many contact form submissions, please try again later.",
-  },
-});
-
-// Middleware
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static("public"));
-
-// Database setup
-const db = new sqlite3.Database("./contacts.db", (err) => {
-  if (err) {
-    console.error("Error opening database:", err.message);
-    // Handle the error appropriately, e.g., exit the process or try to recover
-    process.exit(1); // Exit with an error code
-  } else {
-    console.log("Connected to SQLite database");
-
-    db.run(
-      `CREATE TABLE IF NOT EXISTS contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            message TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ip_address TEXT,
-            user_agent TEXT,
-            status TEXT DEFAULT 'new'
-        )`,
-      (err) => {
-        if (err) {
-          console.error("Error creating table:", err.message);
-          // Handle error, e.g., log and exit
-          process.exit(1);
-        } else {
-          console.log("Contacts table created or already exists.");
-        }
-      }
-    );
-  }
-});
-
-// Input validation middleware
-const validateContactInput = (req, res, next) => {
-  const { name, email, message } = req.body;
-
-  console.log("Validating input:", { name, email, message });
-
-  // Check required fields
-  if (!name || !email || !message) {
-    console.log("Missing fields");
-    return res.status(400).json({
-      error: "All fields are required",
-      details: {
-        name: !name ? "Name is required" : null,
-        email: !email ? "Email is required" : null,
-        message: !message ? "Message is required" : null,
-      },
-    });
-  }
-
-  // Validate email format
-  if (!validator.isEmail(email)) {
-    console.log("Invalid email format");
-    return res.status(400).json({
-      error: "Invalid email format",
-    });
-  }
-
-  // Validate length constraints
-  if (name.length > 100) {
-    console.log("Name too long");
-    return res.status(400).json({
-      error: "Name must be less than 100 characters",
-    });
-  }
-
-  if (message.length > 1000) {
-    console.log("Message too long");
-    return res.status(400).json({
-      error: "Message must be less than 1000 characters",
-    });
-  }
-
-  // Sanitize inputs
-  req.body.name = validator.escape(name.trim());
-  req.body.email = validator.normalizeEmail(email);
-  req.body.message = validator.escape(message.trim());
-
-  console.log("Sanitized input:", {
-    name: req.body.name,
-    email: req.body.email,
-    message: req.body.message,
-  });
-
-  next();
+// --- PostgreSQL Database Connection ---
+// Determine SSL configuration based on environment
+let pgConfig = {
+  connectionString: process.env.DATABASE_URL,
 };
 
-// --- Swagger Definition ---
+// If DATABASE_URL is present (typical for Render production) AND not running locally
+// process.env.NODE_ENV is often 'production' on Render
+// You can also check for a specific environment variable like RENDER
+if (process.env.DATABASE_URL && process.env.NODE_ENV === "production") {
+  pgConfig.ssl = {
+    rejectUnauthorized: false, // Required for Render's self-signed certs
+  };
+} else {
+  // For local development, if DATABASE_URL is set but not for production,
+  // or if connecting to a local PostgreSQL without SSL.
+  // Explicitly set ssl to false or remove the property entirely.
+  pgConfig.ssl = false; // Disable SSL for local development
+}
+
+const pool = new Pool(pgConfig);
+
+// Connect to PostgreSQL and create table if it doesn't exist
+pool
+  .connect()
+  .then((client) => {
+    console.log("Connected to PostgreSQL database.");
+    return client.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        message TEXT NOT NULL,
+        ip_address TEXT,
+        user_agent TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  })
+  .then(() => {
+    console.log("PostgreSQL 'contacts' table ensured.");
+  })
+  .catch((err) => {
+    console.error(
+      "Error connecting to PostgreSQL or creating table:",
+      err.message
+    );
+    // Exit process if database connection fails, as the app won't function
+    process.exit(1);
+  });
+// --- End PostgreSQL Database Connection ---
+
+// Swagger definition
 const swaggerOptions = {
   definition: {
     openapi: "3.0.0",
     info: {
       title: "Contact Form API",
       version: "1.0.0",
-      description: "API for managing contact form submissions",
+      description: "API for submitting contact form messages",
     },
     servers: [
       {
         url: `http://localhost:${PORT}`,
         description: "Development server",
       },
-    ],
-    components: {
-      schemas: {
-        ContactInput: {
-          type: "object",
-          required: ["name", "email", "message"],
-          properties: {
-            name: {
-              type: "string",
-              description: "Full name of the sender",
-              example: "John Doe",
-            },
-            email: {
-              type: "string",
-              format: "email",
-              description: "Email address of the sender",
-              example: "john.doe@example.com",
-            },
-            message: {
-              type: "string",
-              description: "Message content",
-              example: "Hello, I have a question about your service.",
-            },
-          },
-        },
-        Contact: {
-          type: "object",
-          properties: {
-            id: {
-              type: "integer",
-              description: "The auto-generated id of the contact",
-              example: 1,
-            },
-            name: {
-              type: "string",
-              description: "Full name of the sender",
-              example: "John Doe",
-            },
-            email: {
-              type: "string",
-              format: "email",
-              description: "Email address of the sender",
-              example: "john.doe@example.com",
-            },
-            message: {
-              type: "string",
-              description: "Message content",
-              example: "Hello, I have a question about your service.",
-            },
-            timestamp: {
-              type: "string",
-              format: "date-time",
-              description: "Timestamp of the submission",
-              example: "2023-10-27 10:00:00",
-            },
-            ip_address: {
-              type: "string",
-              description: "IP address of the sender",
-              example: "192.168.1.1",
-            },
-            user_agent: {
-              type: "string",
-              description: "User agent string of the sender's browser",
-              example: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            },
-            status: {
-              type: "string",
-              enum: ["new", "read", "replied", "archived"],
-              description: "Status of the contact message",
-              example: "new",
-            },
-          },
-        },
-        Error: {
-          type: "object",
-          properties: {
-            error: {
-              type: "string",
-              description: "Error message",
-              example: "Internal server error",
-            },
-            details: {
-              type: "object",
-              description: "Optional details about the error",
-            },
-          },
-        },
-        MessageResponse: {
-          type: "object",
-          properties: {
-            message: {
-              type: "string",
-              example: "Contact form submitted successfully",
-            },
-            id: {
-              type: "integer",
-              example: 1,
-            },
-          },
-        },
+      {
+        url: "https://your-render-app-url.onrender.com", // Replace with your actual Render URL
+        description: "Production server",
       },
-    },
+    ],
   },
-  apis: ["./server.js"], // Path to the API docs (where JSDoc comments are located)
+  apis: ["./server.js"], // Path to the API docs
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
-// Serve Swagger UI only in development environment
-if (process.env.NODE_ENV !== "production") {
-  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`);
-}
-// --------------------------
+// Middleware
+app.use(cors()); // Enable CORS for all routes
+app.use(express.json()); // Parse JSON request bodies
+app.use(helmet()); // Apply security headers
 
-// API Routes
+// Rate limiting to prevent abuse
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: "Too many requests from this IP, please try again after 15 minutes",
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+app.use("/api/contact", limiter); // Apply rate limiting to contact form submissions
+
+// Serve Swagger UI only in development or if explicitly allowed
+if (
+  process.env.NODE_ENV !== "production" ||
+  process.env.ENABLE_SWAGGER === "true"
+) {
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
+
+// Serve static files from the 'public' directory
+app.use(express.static("public"));
 
 /**
  * @swagger
  * /api/contact:
  *   post:
- *     summary: Submit a new contact message
- *     tags: [Contacts]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/ContactInput'
- *     responses:
- *       201:
- *         description: Contact form submitted successfully
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/MessageResponse'
- *       400:
- *         description: Invalid input
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       429:
- *         description: Too many requests
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-app.post("/api/contact", contactLimiter, validateContactInput, (req, res) => {
-  const { name, email, message } = req.body;
-  const ip_address = req.ip || req.connection.remoteAddress;
-  const user_agent = req.get("User-Agent");
-
-  console.log("Received contact form data:", {
-    name,
-    email,
-    message,
-    ip_address,
-    user_agent,
-  });
-
-  // Insert into database
-  const sql = `INSERT INTO contacts (name, email, message, ip_address, user_agent) 
-                 VALUES (?, ?, ?, ?, ?)`;
-
-  db.run(sql, [name, email, message, ip_address, user_agent], function (err) {
-    if (err) {
-      console.error("Database error:", err.message);
-      console.error("Stack trace:", err.stack);
-      return res.status(500).json({
-        error: "Failed to submit message. Please try again later.",
-      });
-    }
-
-    console.log(`New contact message from ${name} (${email})`);
-
-    // Optional: Send email notification here
-    // sendEmailNotification(name, email, message);
-
-    res.status(201).json({
-      message: "Contact form submitted successfully",
-      id: this.lastID,
-    });
-  });
-});
-
-/**
- * @swagger
- * /api/contacts:
- *   get:
- *     summary: Retrieve a list of all contact messages
- *     tags: [Contacts]
- *     description: (Admin endpoint) Retrieves all contact messages, ordered by timestamp descending.
- *     responses:
- *       200:
- *         description: A list of contact messages.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 contacts:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/Contact'
- *                 total:
- *                   type: integer
- *                   example: 1
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-app.get("/api/contacts", (req, res) => {
-  const sql = `SELECT * FROM contacts ORDER BY timestamp DESC`;
-
-  db.all(sql, [], (err, rows) => {
-    if (err) {
-      console.error("Database error:", err.message);
-      return res.status(500).json({
-        error: "Internal server error",
-      });
-    }
-
-    res.json({
-      contacts: rows,
-      total: rows.length,
-    });
-  });
-});
-
-/**
- * @swagger
- * /api/contacts/{id}:
- *   get:
- *     summary: Retrieve a single contact message by ID
- *     tags: [Contacts]
- *     description: (Admin endpoint) Retrieves a specific contact message using its ID.
- *     parameters:
- *       - in: path
- *         name: id
- *         schema:
- *           type: integer
- *         required: true
- *         description: Numeric ID of the contact to retrieve.
- *     responses:
- *       200:
- *         description: A single contact message.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Contact'
- *       404:
- *         description: Contact not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-app.get("/api/contacts/:id", (req, res) => {
-  const sql = `SELECT * FROM contacts WHERE id = ?`;
-
-  db.get(sql, [req.params.id], (err, row) => {
-    if (err) {
-      console.error("Database error:", err.message);
-      return res.status(500).json({
-        error: "Internal server error",
-      });
-    }
-
-    if (!row) {
-      return res.status(404).json({
-        error: "Contact not found",
-      });
-    }
-
-    res.json(row);
-  });
-});
-
-/**
- * @swagger
- * /api/contacts/{id}/status:
- *   patch:
- *     summary: Update the status of a contact message
- *     tags: [Contacts]
- *     description: (Admin endpoint) Updates the status of a specific contact message.
- *     parameters:
- *       - in: path
- *         name: id
- *         schema:
- *           type: integer
- *         required: true
- *         description: Numeric ID of the contact to update.
+ *     summary: Submit a contact message
+ *     description: Submits a new contact message to the database after validation and sanitization.
  *     requestBody:
  *       required: true
  *       content:
@@ -460,16 +128,26 @@ app.get("/api/contacts/:id", (req, res) => {
  *           schema:
  *             type: object
  *             required:
- *               - status
+ *               - name
+ *               - email
+ *               - message
  *             properties:
- *               status:
+ *               name:
  *                 type: string
- *                 enum: ["new", "read", "replied", "archived"]
- *                 description: The new status for the contact message.
- *                 example: "read"
+ *                 description: The name of the sender.
+ *                 example: John Doe
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: The email address of the sender.
+ *                 example: john.doe@example.com
+ *               message:
+ *                 type: string
+ *                 description: The contact message.
+ *                 example: This is a test message.
  *     responses:
  *       200:
- *         description: Status updated successfully
+ *         description: Message submitted successfully.
  *         content:
  *           application/json:
  *             schema:
@@ -477,120 +155,104 @@ app.get("/api/contacts/:id", (req, res) => {
  *               properties:
  *                 message:
  *                   type: string
- *                   example: "Status updated successfully"
+ *                   example: Message submitted successfully!
  *       400:
- *         description: Invalid status provided
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       404:
- *         description: Contact not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-app.patch("/api/contacts/:id/status", (req, res) => {
-  const { status } = req.body;
-  const validStatuses = ["new", "read", "replied", "archived"];
-
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({
-      error: "Invalid status. Must be one of: " + validStatuses.join(", "),
-    });
-  }
-
-  const sql = `UPDATE contacts SET status = ? WHERE id = ?`;
-
-  db.run(sql, [status, req.params.id], function (err) {
-    if (err) {
-      console.error("Database error:", err.message);
-      return res.status(500).json({
-        error: "Internal server error",
-      });
-    }
-
-    if (this.changes === 0) {
-      return res.status(404).json({
-        error: "Contact not found",
-      });
-    }
-
-    res.json({
-      message: "Status updated successfully",
-    });
-  });
-});
-
-/**
- * @swagger
- * /api/health:
- *   get:
- *     summary: Health check endpoint
- *     tags: [System]
- *     description: Checks the health and uptime of the API server.
- *     responses:
- *       200:
- *         description: Server is healthy.
+ *         description: Invalid input or validation errors.
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 status:
+ *                 error:
  *                   type: string
- *                   example: "ok"
- *                 timestamp:
+ *                   example: Validation failed.
+ *                 details:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       msg:
+ *                         type: string
+ *                       param:
+ *                         type: string
+ *                       location:
+ *                         type: string
+ *       500:
+ *         description: Server error.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
  *                   type: string
- *                   format: "date-time"
- *                   example: "2023-10-27T10:00:00.000Z"
- *                 uptime:
- *                   type: number
- *                   example: 3600
+ *                   example: Internal server error.
  */
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
-    error: "Something went wrong!",
-  });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: "Route not found",
-  });
-});
-
-// Graceful shutdown
-process.on("SIGINT", () => {
-  console.log("Received SIGINT. Graceful shutdown...");
-  db.close((err) => {
-    if (err) {
-      console.error("Error closing database:", err.message);
-    } else {
-      console.log("Database connection closed");
+app.post(
+  "/api/contact",
+  [
+    body("name").trim().notEmpty().withMessage("Name is required").escape(),
+    body("email")
+      .trim()
+      .isEmail()
+      .withMessage("Invalid email address")
+      .normalizeEmail(),
+    body("message")
+      .trim()
+      .notEmpty()
+      .withMessage("Message is required")
+      .escape(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log("Validating input:", req.body); // Log original input
+      console.error("Validation errors:", errors.array());
+      return res
+        .status(400)
+        .json({ error: "Validation failed.", details: errors.array() });
     }
-    process.exit(0);
-  });
+
+    const { name, email, message } = req.body;
+    const ip_address =
+      req.ip || req.headers["x-forwarded-for"] || req.connection.remoteAddress;
+    const user_agent = req.headers["user-agent"];
+
+    console.log("Sanitized input:", { name, email, message }); // Log sanitized input
+    console.log("Received contact form data:", {
+      name,
+      email,
+      message,
+      ip_address,
+      user_agent,
+    });
+
+    try {
+      // --- PostgreSQL INSERT ---
+      const result = await pool.query(
+        "INSERT INTO contacts (name, email, message, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        [name, email, message, ip_address, user_agent]
+      );
+      console.log(
+        `New contact message from ${name} (${email}) saved with ID: ${result.rows[0].id}`
+      );
+      // --- End PostgreSQL INSERT ---
+
+      res.status(200).json({ message: "Message submitted successfully!" });
+    } catch (err) {
+      console.error("Error saving contact message to PostgreSQL:", err.message);
+      res.status(500).json({ error: "Internal server error." });
+    }
+  }
+);
+
+// Basic health check endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Service is healthy" });
 });
 
+// Start the server
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Access Swagger UI at http://localhost:${PORT}/api-docs`);
 });

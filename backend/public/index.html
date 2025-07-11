@@ -320,6 +320,7 @@
         transition: all 0.6s ease 0.2s;
       }
 
+      /* Apply 'animate' class to the section to reveal its content */
       .section.animate .section-title,
       .section.animate .section-subtitle {
         opacity: 1;
@@ -340,9 +341,9 @@
         border-radius: 20px;
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
         text-align: center;
-        opacity: 0;
-        transform: translateY(30px);
-        transition: all 0.6s ease;
+        opacity: 0; /* Initial hidden state */
+        transform: translateY(30px); /* Initial hidden state */
+        transition: all 0.6s ease; /* Transition for animation */
       }
 
       .section.animate .skill-category {
@@ -411,8 +412,8 @@
         overflow: hidden;
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
         transition: all 0.3s ease;
-        opacity: 0;
-        transform: translateY(30px);
+        opacity: 0; /* Initial hidden state */
+        transform: translateY(30px); /* Initial hidden state */
       }
 
       .section.animate .project-card {
@@ -557,9 +558,9 @@
         display: flex;
         align-items: center;
         gap: 15px;
-        opacity: 0;
-        transform: translateX(-30px);
-        transition: all 0.6s ease;
+        opacity: 0; /* Initial hidden state */
+        transform: translateX(-30px); /* Initial hidden state */
+        transition: all 0.6s ease; /* Transition for animation */
       }
 
       .section.animate .contact-item {
@@ -575,19 +576,6 @@
       }
       .contact-item:nth-child(3) {
         transition-delay: 0.3s;
-      }
-
-      .contact-icon {
-        width: 50px;
-        height: 50px;
-        background: linear-gradient(135deg, #00f7ff, #ff0080);
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.2rem;
-        color: white;
-        box-shadow: 0 5px 15px rgba(0, 247, 255, 0.3);
       }
 
       .contact-form {
@@ -964,332 +952,7 @@
       </div>
     </footer>
 
-    <script>
-      // Smooth scrolling for navigation links
-      document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
-        anchor.addEventListener("click", function (e) {
-          e.preventDefault();
-          document.querySelector(this.getAttribute("href")).scrollIntoView({
-            behavior: "smooth",
-          });
-        });
-      });
-
-      // Animate sections on scroll
-      const observerOptions = {
-        threshold: 0.1,
-        rootMargin: "0px 0px -100px 0px",
-      };
-
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("animate");
-          }
-        });
-      }, observerOptions);
-
-      document.querySelectorAll(".section").forEach((section) => {
-        observer.observe(section);
-      });
-
-      // Header scroll effect
-      window.addEventListener("scroll", () => {
-        const header = document.querySelector("header");
-        if (window.scrollY > 100) {
-          header.style.background = "rgba(15, 15, 35, 0.98)";
-          header.style.boxShadow = "0 2px 20px rgba(0, 247, 255, 0.2)";
-        } else {
-          header.style.background = "rgba(15, 15, 35, 0.95)";
-          header.style.boxShadow = "none";
-        }
-      });
-
-      // Form submission with backend integration
-      document
-        .querySelector(".contact-form")
-        .addEventListener("submit", async function (e) {
-          e.preventDefault();
-
-          const formData = new FormData(this);
-          const data = {
-            name: formData.get("name"),
-            email: formData.get("email"),
-            message: formData.get("message"),
-            timestamp: new Date().toISOString(),
-          };
-
-          try {
-            // Show loading state
-            const submitBtn = this.querySelector('button[type="submit"]');
-            const originalText = submitBtn.textContent;
-            submitBtn.textContent = "Sending...";
-            submitBtn.disabled = true;
-
-            // Send to backend API
-            const response = await fetch("/api/contact", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(data),
-            });
-
-            if (response.ok) {
-              // Success feedback
-              submitBtn.textContent = "Message Sent! ✓";
-              submitBtn.style.background =
-                "linear-gradient(135deg, #10b981, #059669)";
-              this.reset();
-
-              // Show success message
-              showNotification(
-                "Thank you for your message! I'll get back to you soon.",
-                "success"
-              );
-            } else {
-              throw new Error("Network response was not ok");
-            }
-          } catch (error) {
-            console.error("Error:", error);
-            showNotification(
-              "Sorry, there was an error sending your message. Please try again.",
-              "error"
-            );
-          } finally {
-            // Reset button after 3 seconds
-            setTimeout(() => {
-              const submitBtn = this.querySelector('button[type="submit"]');
-              if (submitBtn) {
-                submitBtn.textContent = originalText;
-                submitBtn.style.background =
-                  "linear-gradient(135deg, #00f7ff, #ff0080)";
-                submitBtn.disabled = false;
-              }
-            }, 3000);
-          }
-        });
-
-      // Notification system
-      function showNotification(message, type = "info") {
-        const notification = document.createElement("div");
-        notification.className = `notification notification-${type}`;
-        notification.textContent = message;
-
-        notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px 20px;
-                border-radius: 10px;
-                color: white;
-                font-weight: 500;
-                z-index: 10000;
-                transform: translateX(100%);
-                transition: transform 0.3s ease;
-                max-width: 300px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            `;
-
-        if (type === "success") {
-          notification.style.background =
-            "linear-gradient(135deg, #10b981, #059669)";
-        } else if (type === "error") {
-          notification.style.background =
-            "linear-gradient(135deg, #ef4444, #dc2626)";
-        } else {
-          notification.style.background =
-            "linear-gradient(135deg, #3b82f6, #1d4ed8)";
-        }
-
-        document.body.appendChild(notification);
-
-        // Animate in
-        setTimeout(() => {
-          notification.style.transform = "translateX(0)";
-        }, 100);
-
-        // Remove after 5 seconds
-        setTimeout(() => {
-          notification.style.transform = "translateX(100%)";
-          setTimeout(() => {
-            if (notification.parentNode) {
-              notification.parentNode.removeChild(notification);
-            }
-          }, 300);
-        }, 5000);
-      }
-
-      // Animated metrics counter
-      function animateMetrics() {
-        const metrics = document.querySelectorAll(".metric-value");
-        metrics.forEach((metric) => {
-          const target = parseFloat(metric.textContent);
-          const isPercentage = metric.textContent.includes("%");
-          const isLarge = metric.textContent.includes("M");
-
-          let current = 0;
-          const increment = target / 100;
-          const timer = setInterval(() => {
-            current += increment;
-            if (current >= target) {
-              current = target;
-              clearInterval(timer);
-            }
-
-            if (isPercentage) {
-              metric.textContent = Math.floor(current) + "%";
-            } else if (isLarge) {
-              metric.textContent = current.toFixed(1) + "M";
-            } else {
-              metric.textContent = Math.floor(current) + "+";
-            }
-          }, 50);
-        });
-      }
-
-      // Trigger metrics animation when hero section is visible
-      const heroObserver = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-              animateMetrics();
-              heroObserver.unobserve(entry.target);
-            }
-          });
-        },
-        { threshold: 0.5 }
-      );
-
-      heroObserver.observe(document.querySelector(".hero"));
-
-      // Parallax effect for hero background
-      window.addEventListener("scroll", () => {
-        const scrolled = window.pageYOffset;
-        const hero = document.querySelector(".hero");
-        if (hero) {
-          hero.style.transform = `translateY(${scrolled * 0.5}px)`;
-        }
-      });
-
-      // Typing effect for hero title
-      function typeWriter(element, text, delay = 100) {
-        element.textContent = "";
-        let i = 0;
-        const timer = setInterval(() => {
-          if (i < text.length) {
-            element.textContent += text.charAt(i);
-            i++;
-          } else {
-            clearInterval(timer);
-          }
-        }, delay);
-      }
-
-      // Initialize typing effect after page load
-      window.addEventListener("load", () => {
-        setTimeout(() => {
-          const heroTitle = document.querySelector(".hero-text h1");
-          if (heroTitle) {
-            typeWriter(heroTitle, "Data Scientist", 150);
-          }
-        }, 1000);
-      });
-
-      // Add mouse move effect to project cards
-      document.querySelectorAll(".project-card").forEach((card) => {
-        card.addEventListener("mousemove", (e) => {
-          const rect = card.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-
-          const centerX = rect.width / 2;
-          const centerY = rect.height / 2;
-
-          const rotateX = (y - centerY) / 10;
-          const rotateY = (centerX - x) / 10;
-
-          card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-10px)`;
-        });
-
-        card.addEventListener("mouseleave", () => {
-          card.style.transform =
-            "perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(0px)";
-        });
-      });
-
-      // Add floating animation to skill icons
-      document.querySelectorAll(".skill-icon").forEach((icon, index) => {
-        icon.style.animation = `float 3s ease-in-out infinite ${index * 0.5}s`;
-      });
-
-      // Progress bar animation for skills
-      function createProgressBars() {
-        const skills = [
-          { name: "Python", level: 95 },
-          { name: "Machine Learning", level: 90 },
-          { name: "SQL", level: 85 },
-          { name: "R", level: 80 },
-          { name: "Tableau", level: 88 },
-          { name: "Statistics", level: 92 },
-        ];
-
-        // This could be expanded to show actual progress bars in the skills section
-        return skills;
-      }
-
-      // Initialize all interactive features
-      document.addEventListener("DOMContentLoaded", () => {
-        // Add loading animation
-        document.body.style.opacity = "0";
-        setTimeout(() => {
-          document.body.style.transition = "opacity 0.5s ease";
-          document.body.style.opacity = "1";
-        }, 100);
-
-        // Initialize progress bars data
-        const skillsData = createProgressBars();
-
-        // Add intersection observer for smoother animations
-        const elementsToAnimate = document.querySelectorAll(
-          ".skill-category, .project-card, .contact-item"
-        );
-        elementsToAnimate.forEach((element, index) => {
-          element.style.opacity = "0";
-          element.style.transform = "translateY(30px)";
-
-          setTimeout(() => {
-            element.style.transition = "all 0.6s ease";
-            element.style.opacity = "1";
-            element.style.transform = "translateY(0)";
-          }, index * 100);
-        });
-      });
-
-      // Add keyboard navigation
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          // Close any open modals or reset focus
-          document.activeElement.blur();
-        }
-      });
-
-      // Add smooth scroll to top functionality
-      const scrollToTop = () => {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      };
-
-      // Show/hide scroll to top button
-      window.addEventListener("scroll", () => {
-        const scrollButton = document.querySelector(".scroll-to-top");
-        if (scrollButton) {
-          if (window.scrollY > 300) {
-            scrollButton.classList.add("visible");
-          } else {
-            scrollButton.classList.remove("visible");
-          }
-        }
-      });
-    </script>
+    <!-- Link to external JavaScript file -->
+    <script src="script.js"></script>
   </body>
 </html>
